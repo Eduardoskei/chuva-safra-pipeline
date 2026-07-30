@@ -17,20 +17,21 @@ O serviço calcula produtividade, agrega chuva por safra, mede a correlação en
 ### 1. Clonar o repositório
 
 ```bash
-git clone https://github.com/<seu-usuario>/chuva-e-safra.git
-cd chuva-e-safra/data
+git clone https://github.com/<seu-usuario>/chuva-safra-pipeline.git
+cd chuva-safra-pipeline
 code .
 ```
 
 ### 2. Criar e ativar o ambiente virtual
 
 ```bash
+# Criando venv em python
 python -m venv venv
 
-# Linux/Mac
+# Iniciando no Linux/Mac
 source venv/bin/activate
 
-# Windows
+# iniciando no Windows
 venv\Scripts\activate
 ```
 
@@ -56,9 +57,3 @@ uvicorn main:app --reload --port 8000
 
 - API: `http://localhost:8000`
 - Docs (Swagger): `http://localhost:8000/docs`
-
-### 6. Testar a rota principal
-
-```bash
-curl "http://localhost:8000/grafico?perfil=produtor&municipios=2300101&cultura=milho&de=2015&ate=2022"
-```
