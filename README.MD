@@ -17,7 +17,7 @@ O serviço calcula produtividade, agrega chuva por safra, mede a correlação en
 ### 1. Clonar o repositório
 
 ```bash
-git clone https://github.com/<seu-usuario>/chuva-safra-pipeline.git
+git clone https://github.com/Eduardoskei/chuva-safra-pipeline.git
 cd chuva-safra-pipeline
 code .
 ```
