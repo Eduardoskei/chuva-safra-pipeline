@@ -2,6 +2,12 @@ import pandas as pd
 from utils import normalizar_nome
 
 
+def validar_chave_unica(df: pd.DataFrame, chave: list[str], nome_base: str):
+    #Garante que não há chaves repetidas antes do merge.
+    if df.duplicated(subset=chave).any():
+        raise ValueError(f"Erro: chaves duplicadas encontradas na base de {nome_base}!")
+
+
 def cruzar_producao_clima_por_nome(df_producao: pd.DataFrame, df_clima: pd.DataFrame) -> pd.DataFrame:
     """
     Cruza produção e clima usando (nome_municipio normalizado + UF + ano)
@@ -18,13 +24,8 @@ def cruzar_producao_clima_por_nome(df_producao: pd.DataFrame, df_clima: pd.DataF
 
     chave = ["chave_nome", "chave_uf", "ano"]
 
-    if df_producao.duplicated(subset=chave).any():
-        raise ValueError(
-            "Erro: chaves (nome normalizado + UF + ano) duplicadas na base de PRODUÇÃO! "
-            "Provavelmente dois municípios diferentes normalizaram para o mesmo nome."
-        )
-    if df_clima.duplicated(subset=chave).any():
-        raise ValueError("Erro: chaves duplicadas na base de CLIMA!")
+    validar_chave_unica(df_producao, chave, "PRODUÇÃO")
+    validar_chave_unica(df_clima, chave, "CLIMA")
 
     linhas_antes = len(df_producao)
 
