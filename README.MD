@@ -12,7 +12,7 @@ O serviço calcula produtividade, agrega chuva por safra, mede a correlação en
 
 - [Python 3.10+](https://www.python.org/)
 - [VSCode](https://code.visualstudio.com/)
-- Extensões recomendadas: `Python`, `Pylance`
+- Extensões recomendadas: `Python`
 
 ### 1. Clonar o repositório
 
