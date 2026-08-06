@@ -42,12 +42,7 @@ def normalizar_nome(nome: str) -> str:
     )
 
 def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
-
-    #Busca as coordenadas na Open-Meteo e valida se o resultado pertence ao estado esperado, evitando homônimos.
-    
     url = "https://geocoding-api.open-meteo.com/v1/search"
-
-    # Busca focada no Brasil (country=BR)
     params = {
         "name": normalizar_nome(nome),
         "country": "BR",
@@ -56,14 +51,20 @@ def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
         "format": "json"
     }
 
-    resposta = requests.get(url, params=params).json()
+    try:
+        resposta = requests.get(url, params=params, timeout=10)
+        resposta.raise_for_status()
+        dados = resposta.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao consultar a API de geocodificação: {e}")
+        return None, None
+    except ValueError:  # json.JSONDecodeError herda de ValueError
+        print("Resposta inválida (não é JSON) da API")
+        return None, None
 
-    # Valida se a UF retornada (admin1) bate com a UF esperada 
-    # OBS: admin1 é o nivel de subdivisão administrativa, que no caso do Brasil é o estado (UF).
-    for lugar in resposta.get("results", []):
+    for lugar in dados.get("results", []):
         estado_encontrado = lugar.get("admin1", "")
         if normalizar_nome(uf_esperada) in normalizar_nome(estado_encontrado):
             return lugar["latitude"], lugar["longitude"]
 
-    # Retorna None se não achar ou se achar apenas em outro estado
     return None, None
