@@ -1,7 +1,12 @@
 import requests
 from app.utils import normalizar_nome
+from app.database import get_coordenadas, salvar_coordenadas
 
 def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
+    cache = get_coordenadas(nome, uf_esperada)
+    if cache:
+        return cache
+
     url = "https://geocoding-api.open-meteo.com/v1/search"
     params = {
         "name": normalizar_nome(nome),
@@ -25,6 +30,10 @@ def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
     for lugar in dados.get("results", []):
         estado_encontrado = lugar.get("admin1", "")
         if normalizar_nome(uf_esperada) in normalizar_nome(estado_encontrado):
-            return lugar["latitude"], lugar["longitude"]
+            latitude, longitude = lugar["latitude"], lugar["longitude"]
+            salvar_coordenadas(nome, uf_esperada, latitude, longitude)
+            return latitude, longitude
 
     return None, None
+
+buscar_coordenadas("Fortaleza")
