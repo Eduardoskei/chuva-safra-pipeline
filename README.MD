@@ -6,6 +6,30 @@ O serviço calcula produtividade, agrega chuva por safra, mede a correlação en
 
 ---
 
+## 📁 Estrutura do projeto
+
+```
+chuva-safra-pipeline/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # ponto de entrada do FastAPI
+│   ├── routes.py            # rotas da API (ex: /grafico)
+│   ├── database.py          # conexão com o banco (pool + cache)
+│   ├── utils.py             # funções auxiliares genéricas
+│   ├── pipeline/
+│   │   ├── ingestao/
+│   │   │   ├── __init__.py
+│   │   │   ├── ibge.py      # busca produção agrícola (SIDRA)
+│   │   │   └── geocoding.py # nome do município -> lat/lon
+│   │   ├── limpeza.py       # trata os dados brutos
+│   │   ├── merge.py         # junta produção + clima
+│   │   └── analises.py      # produtividade, correlação, gráfico
+├── requirements.txt
+└── README.md
+```
+
+---
+
 ## 🚀 Getting Started (VSCode)
 
 ### Pré-requisitos
@@ -51,8 +75,10 @@ cp .env.example .env
 
 ### 5. Subir o serviço
 
+Como o `main.py` está dentro de `app/`, o comando deve ser executado a partir da **raiz** do projeto:
+
 ```bash
-uvicorn main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000
 ```
 
 - API: `http://localhost:8000`
