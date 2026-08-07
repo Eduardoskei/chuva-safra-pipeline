@@ -1,5 +1,5 @@
 import pandas as pd
-from utils import normalizar_nome, MAPA_UF
+from app.utils import normalizar_nome, MAPA_UF
 
 
 def validar_chave_unica(df: pd.DataFrame, chave: list[str], nome_base: str):
