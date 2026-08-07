@@ -18,3 +18,35 @@ def calcular_produtividade(df: pd.DataFrame, col_qtd: str, col_area: str) -> pd.
         print("   -> Produtividade definida como NaN para evitar divisão por zero.")
         
     return df_analise
+
+
+
+def calcular_kpis(df: pd.DataFrame, perfil: str) -> dict:
+    """
+    Calcula KPIs dinâmicos conforme a regra de negócio central da rota.
+    Conforme Item 1.6 - api_grafico.py
+    """
+    if perfil == "produtor":
+        # Produtor vê médias do seu próprio município
+        return {
+            "produtividade_media": round(df["produtividade"].mean(), 2),
+            "chuva_total": round(df["chuva_total"].sum(), 1),
+        }
+
+    if perfil == "tecnico":
+        # Técnico vê comparação entre os municípios
+        agrupado = df.groupby("municipio")["produtividade"].mean().round(2)
+        return {"produtividade_por_municipio": agrupado.to_dict()}
+
+    if perfil == "gestor":
+        # Gestor vê ranking estadual completo (ordenado)
+        ranking = (
+            df.groupby("municipio")["produtividade"]
+            .mean()
+            .sort_values(ascending=False)
+            .round(2)
+        )
+        return {"ranking_estadual": ranking.to_dict()}
+
+    # perfil desconhecido -> resposta mínima, nunca vazar dado de outro perfil
+    return {}
