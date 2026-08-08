@@ -35,4 +35,3 @@ def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
             return latitude, longitude
 
     return None, None
-
