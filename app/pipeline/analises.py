@@ -35,13 +35,13 @@ def calcular_kpis(df: pd.DataFrame, perfil: str) -> dict:
 
     if perfil == "tecnico":
         # Técnico vê comparação entre os municípios
-        agrupado = df.groupby("municipio")["produtividade"].mean().round(2)
+        agrupado = df.groupby("nome_municipio")["produtividade"].mean().round(2)
         return {"produtividade_por_municipio": agrupado.to_dict()}
 
     if perfil == "gestor":
         # Gestor vê ranking estadual completo (ordenado)
         ranking = (
-            df.groupby("municipio")["produtividade"]
+            df.groupby("nome_municipio")["produtividade"]
             .mean()
             .sort_values(ascending=False)
             .round(2)
