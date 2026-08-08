@@ -29,11 +29,10 @@ def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
 
     for lugar in dados.get("results", []):
         estado_encontrado = lugar.get("admin1", "")
-        if normalizar_nome(uf_esperada) in normalizar_nome(estado_encontrado):
+        if normalizar_nome(uf_esperada) == normalizar_nome(estado_encontrado):
             latitude, longitude = lugar["latitude"], lugar["longitude"]
             salvar_coordenadas(nome, uf_esperada, latitude, longitude)
             return latitude, longitude
 
     return None, None
 
-buscar_coordenadas("Fortaleza")
