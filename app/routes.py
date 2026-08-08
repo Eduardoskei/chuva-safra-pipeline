@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Literal
@@ -32,9 +32,21 @@ class DadosResponse(BaseModel):
 COLUNAS_ESPERADAS = {"nome_municipio", "uf", "ano", "cultura", "chuva_total", "produtividade"}
 
 
+def parse_municipios(municipios: str = Query(..., description="Municípios separados por vírgula")) -> list[str]:
+    """
+    Dependency compartilhada entre /dados e /mapa.
+    Faz split por vírgula, remove espaços e descarta itens vazios
+    (ex: "Amontada,,Sobral" não gera item em branco).
+    """
+    lista = [m.strip() for m in municipios.split(",") if m.strip()]
+    if not lista:
+        raise HTTPException(400, "informe ao menos um município em 'municipios'")
+    return lista
+
+
 def _pipeline_mock(municipios: list[str], cultura: str, de: int, ate: int) -> pd.DataFrame:
-    
-    #Mock temporário até app/pipeline/orchestrator.executar_pipeline_completo
+
+    # Mock temporário até app/pipeline/orchestrator.executar_pipeline_completo
 
     return pd.DataFrame({
         "nome_municipio": ["Amontada", "Amontada", "Abaiara", "Abaiara"],
@@ -65,14 +77,11 @@ def _validar_contrato(df: pd.DataFrame) -> None:
 @router.get("/dados", response_model=DadosResponse)
 def obter_dados(
     perfil: PerfilType = Query(..., description="Perfil do usuário (produtor, tecnico, gestor)"),
-    municipios: str = Query(..., description="Municípios separados por vírgula"),
+    lista_municipios: list[str] = Depends(parse_municipios),
     cultura: str = Query(..., description="Cultura agrícola"),
     de: int = Query(..., description="Ano de início"),
     ate: int = Query(..., description="Ano de fim"),
 ):
-    lista_municipios = [m.strip() for m in municipios.split(",") if m.strip()]
-    if not lista_municipios:
-        raise HTTPException(400, "informe ao menos um município em 'municipios'")
     if de > ate:
         raise HTTPException(400, "'de' não pode ser maior que 'ate'")
 
@@ -118,15 +127,12 @@ def obter_dados(
 @router.get("/mapa", response_class=HTMLResponse)
 def obter_mapa(
     perfil: PerfilType = Query(...),
-    municipios: str = Query(...),
+    lista_municipios: list[str] = Depends(parse_municipios),
     cultura: str = Query(...),
     de: int = Query(...),
     ate: int = Query(...),
 ):
     """Devolve o HTML do mapa Folium conforme perfil e recorte."""
-    lista_municipios = [m.strip() for m in municipios.split(",") if m.strip()]
-    if not lista_municipios:
-        raise HTTPException(400, "informe ao menos um município em 'municipios'")
 
     # Mesmo ponto de troca do /dados: app/pipeline/mapas.py ainda não
     # existe. Quando existir com uma função gerar_mapa(...), esta rota
