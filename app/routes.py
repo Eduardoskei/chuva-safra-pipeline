@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Literal
+from utils import normalizar
 import pandas as pd
 
 from app.pipeline.analises import calcular_kpis
@@ -18,14 +19,33 @@ PerfilType = Literal["produtor", "tecnico", "gestor"]
 
 
 class PontoData(BaseModel):
+    municipio: str
     ano: int
     chuva: Optional[float] = None
     produtividade: Optional[float] = None
 
+class KPIsProdutor(BaseModel):
+    produtividade_media: Optional[float] = None
+    chuva_total: Optional[float] = None
+
+
+class KPIsTecnico(BaseModel):
+    produtividade_por_municipio: Dict[str, float]
+
+
+class KPIsGestor(BaseModel):
+    ranking_estadual: Dict[str, float]
+
+
+class KPIsVazio(BaseModel):
+    pass
+
+
+KPIsType = KPIsProdutor | KPIsTecnico | KPIsGestor | KPIsVazio
 
 class DadosResponse(BaseModel):
     pontos: List[PontoData]
-    kpis: Dict[str, Any]
+    kpis: KPIsType
 
 
 # Colunas que a rota /dados exige de quem quer que produza o df final.
@@ -90,24 +110,26 @@ def obter_dados(
     # linhas abaixo assim que executar_pipeline_completo() existir.
     # ------------------------------------------------------------------
     df_final = _pipeline_mock(lista_municipios, cultura, de, ate)
-    # df_final = executar_pipeline_completo(
-    #     municipios=lista_municipios, cultura=cultura, de=de, ate=ate
-    # )
+        # df_final = executar_pipeline_completo(...)
 
     _validar_contrato(df_final)
 
+    lista_municipios_norm = [normalizar(m) for m in lista_municipios]
+    cultura_norm = normalizar(cultura)
+
     df_final = df_final[
-        df_final["nome_municipio"].isin(lista_municipios)
-        & (df_final["cultura"] == cultura)
+        df_final["nome_municipio"].apply(normalizar).isin(lista_municipios_norm)
+        & (df_final["cultura"].apply(normalizar) == cultura_norm)
         & df_final["ano"].between(de, ate)
     ]
 
     if df_final.empty:
         return {"pontos": [], "kpis": {}}
 
-    df_contrato = df_final[["ano", "chuva_total", "produtividade"]].rename(
-        columns={"chuva_total": "chuva"}
+    df_contrato = df_final[["nome_municipio", "ano", "chuva_total", "produtividade"]].rename(
+        columns={"nome_municipio": "municipio", "chuva_total": "chuva"}
     )
+    
     pontos = df_contrato.to_dict(orient="records")
 
     try:

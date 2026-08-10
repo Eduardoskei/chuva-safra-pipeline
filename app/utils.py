@@ -24,3 +24,7 @@ def normalizar_nome(nome) -> str:
         c for c in unicodedata.normalize('NFD', nome)
         if unicodedata.category(c) != 'Mn'
     )
+
+def normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    return texto.strip().lower()
