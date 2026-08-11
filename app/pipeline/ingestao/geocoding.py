@@ -2,7 +2,7 @@ import requests
 from app.utils import normalizar_nome
 from app.database import get_coordenadas, salvar_coordenadas
 
-def buscar_coordenadas(nome: str, uf_esperada: str = "Ceará"):
+def buscar_coordenadas(nome: str, uf_esperada: str):
     cache = get_coordenadas(nome, uf_esperada)
     if cache:
         return cache

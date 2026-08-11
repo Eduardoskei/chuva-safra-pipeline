@@ -57,17 +57,39 @@ def buscar_clima_municipio(nome_municipio: str, uf: str, data_inicio: str, data_
     return serie[COLUNAS_CLIMA]
 
 
-def buscar_clima_municipios(municipios: list[tuple[str, str]], data_inicio: str, data_fim: str) -> pd.DataFrame:
+def buscar_clima_municipios(municipios, data_inicio, data_fim):
     series = []
+    falhas = []
 
     for nome_municipio, uf in municipios:
         print(f"Buscando clima de {nome_municipio} ({uf})...")
-        serie = buscar_clima_municipio(nome_municipio, uf, data_inicio, data_fim)
-        if not serie.empty:
-            series.append(serie)
+
+        latitude, longitude = buscar_coordenadas(nome_municipio, uf)
+        if latitude is None or longitude is None:
+            falhas.append({
+                "nome_municipio": nome_municipio,
+                "uf": uf,
+                "motivo": "geocoding_nao_encontrado",
+            })
+            time.sleep(0.5)
+            continue
+
+        serie = buscar_serie_climatica(latitude, longitude, data_inicio, data_fim)
+        if serie.empty:
+            falhas.append({
+                "nome_municipio": nome_municipio,
+                "uf": uf,
+                "motivo": "api_clima_sem_dados",
+            })
+            time.sleep(0.5)
+            continue
+
+        serie["nome_municipio"] = nome_municipio
+        serie["uf"] = uf
+        series.append(serie[COLUNAS_CLIMA])
         time.sleep(0.5)
 
-    if not series:
-        return pd.DataFrame(columns=COLUNAS_CLIMA)
+    df_clima = pd.concat(series, ignore_index=True) if series else pd.DataFrame(columns=COLUNAS_CLIMA)
+    df_falhas = pd.DataFrame(falhas, columns=["nome_municipio", "uf", "motivo"])
 
-    return pd.concat(series, ignore_index=True)
+    return df_clima, df_falhas
