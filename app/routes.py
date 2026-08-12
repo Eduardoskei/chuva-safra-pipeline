@@ -2,10 +2,10 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Literal
-from utils import normalizar
+from app.utils import normalizar
 import pandas as pd
 
-from app.pipeline.analises import calcular_kpis
+from app.pipeline.analises import calcular_kpis, resumir_analise
 
 
 # from app.pipeline.orchestrator import executar_pipeline_completo
@@ -43,9 +43,18 @@ class KPIsVazio(BaseModel):
 
 KPIsType = KPIsProdutor | KPIsTecnico | KPIsGestor | KPIsVazio
 
+
+class AnaliseResponse(BaseModel):
+    metodo_correlacao: str
+    correlacao_chuva_produtividade: Optional[float] = None
+    observacoes_validas: int
+    janela_chuva: str
+    interpretacao: str
+
 class DadosResponse(BaseModel):
     pontos: List[PontoData]
     kpis: KPIsType
+    analise: AnaliseResponse
 
 
 # Colunas que a rota /dados exige de quem quer que produza o df final.
@@ -124,7 +133,7 @@ def obter_dados(
     ]
 
     if df_final.empty:
-        return {"pontos": [], "kpis": {}}
+        return {"pontos": [], "kpis": {}, "analise": resumir_analise(df_final)}
 
     df_contrato = df_final[["nome_municipio", "ano", "chuva_total", "produtividade"]].rename(
         columns={"nome_municipio": "municipio", "chuva_total": "chuva"}
@@ -140,7 +149,7 @@ def obter_dados(
             detail=f"Não foi possível calcular os KPIs, coluna ausente: {e}",
         )
 
-    return {"pontos": pontos, "kpis": kpis}
+    return {"pontos": pontos, "kpis": kpis, "analise": resumir_analise(df_final)}
 
 
 # ==========================================

@@ -1,45 +1,127 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def calcular_produtividade(df: pd.DataFrame, col_qtd: str, col_area: str) -> pd.DataFrame:
-    #Calcula a produtividade e trata a divisão por zero.
-    df_analise = df.copy()
-    area_valida = (df_analise[col_area] > 0) & (df_analise[col_area].notna())
-    
-    df_analise['produtividade'] = np.where(
-        area_valida, 
-        df_analise[col_qtd] / df_analise[col_area], 
-        np.nan
+def calcular_produtividade(df: pd.DataFrame, col_qtd: str = "producao", col_area: str = "area_colhida") -> pd.DataFrame:
+    """Calcula produção/área colhida e invalida denominadores não positivos."""
+    faltantes = {col_qtd, col_area} - set(df.columns)
+    if faltantes:
+        raise KeyError(f"Colunas ausentes para calcular produtividade: {sorted(faltantes)}")
+
+    resultado = df.copy()
+    producao = pd.to_numeric(resultado[col_qtd], errors="coerce")
+    area = pd.to_numeric(resultado[col_area], errors="coerce")
+    area_valida = area.gt(0) & area.notna()
+
+    resultado["produtividade"] = producao.div(area).where(area_valida)
+    return resultado
+
+
+def preparar_producao_ibge(df: pd.DataFrame) -> pd.DataFrame:
+    obrigatorias = {
+        "variavel_id", "valor", "municipio", "uf", "ano",
+        "categoria_id", "categoria_nome", "tipo_lavoura",
+    }
+
+    faltantes = obrigatorias - set(df.columns)
+
+    if faltantes:
+        raise KeyError(f"Colunas ausentes nos dados do IBGE: {sorted(faltantes)}")
+
+    dados = df.copy()
+    dados["variavel_id"] = dados["variavel_id"].astype(str)
+    dados["valor"] = pd.to_numeric(dados["valor"], errors="coerce")
+    dados["ano"] = pd.to_numeric(dados["ano"], errors="coerce")
+    dados = dados[dados["variavel_id"].isin({"214", "216"})]
+
+    indice = [
+        "municipio", "uf", "ano", "categoria_id", "categoria_nome",
+        "tipo_lavoura",
+    ]
+    tabela = (
+        dados.pivot_table(index=indice, columns="variavel_id", values="valor", aggfunc="first")
+        .rename(columns={"214": "producao", "216": "area_colhida"})
+        .reset_index()
+        .rename(columns={"municipio": "nome_municipio", "categoria_nome": "cultura"})
     )
-    
-    qtd_zerados = (~area_valida).sum()
-    if qtd_zerados > 0:
-        print(f"⚠ Aviso: {qtd_zerados} registro(s) com '{col_area}' igual a zero ou nula.")
-        print("   -> Produtividade definida como NaN para evitar divisão por zero.")
-        
-    return df_analise
+    for coluna in ("producao", "area_colhida"):
+        if coluna not in tabela:
+            tabela[coluna] = np.nan
 
+    tabela["ano"] = tabela["ano"].astype("Int64")
+    return calcular_produtividade(tabela)
+
+
+def agregar_chuva_por_safra(df_clima: pd.DataFrame, mes_inicio: int = 10, mes_fim: int = 3) -> pd.DataFrame:
+    if not 1 <= mes_inicio <= 12 or not 1 <= mes_fim <= 12:
+        raise ValueError("mes_inicio e mes_fim devem estar entre 1 e 12")
+
+    obrigatorias = {"nome_municipio", "uf", "data", "precipitacao_mm"}
+    faltantes = obrigatorias - set(df_clima.columns)
+    if faltantes:
+        raise KeyError(f"Colunas ausentes nos dados climáticos: {sorted(faltantes)}")
+
+    clima = df_clima.copy()
+    clima["data"] = pd.to_datetime(clima["data"], errors="coerce")
+    clima["precipitacao_mm"] = pd.to_numeric(clima["precipitacao_mm"], errors="coerce")
+    clima = clima.dropna(subset=["data"])
+    mes = clima["data"].dt.month
+
+    cruza_ano = mes_inicio > mes_fim
+    if cruza_ano:
+        na_janela = mes.ge(mes_inicio) | mes.le(mes_fim)
+        clima = clima.loc[na_janela].copy()
+        clima["ano"] = clima["data"].dt.year + clima["data"].dt.month.ge(mes_inicio).astype(int)
+    else:
+        clima = clima.loc[mes.between(mes_inicio, mes_fim)].copy()
+        clima["ano"] = clima["data"].dt.year
+
+    return (
+        clima.groupby(["nome_municipio", "uf", "ano"], as_index=False, dropna=False)
+        .agg(chuva_total=("precipitacao_mm", lambda serie: serie.sum(min_count=1)))
+        .sort_values(["uf", "nome_municipio", "ano"])
+        .reset_index(drop=True)
+    )
+
+
+def calcular_correlacao(df: pd.DataFrame, col_chuva: str = "chuva_total", col_produtividade: str = "produtividade") -> float:
+    """Retorna a correlação de Pearson; NaN indica amostra/variação insuficiente."""
+    faltantes = {col_chuva, col_produtividade} - set(df.columns)
+    if faltantes:
+        raise KeyError(f"Colunas ausentes para calcular correlação: {sorted(faltantes)}")
+
+    pares = df[[col_chuva, col_produtividade]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(pares) < 2 or pares.nunique().min() < 2:
+        return float("nan")
+    return float(pares[col_chuva].corr(pares[col_produtividade], method="pearson"))
+
+
+def resumir_analise(df: pd.DataFrame) -> dict:
+    """Produz o resultado reportável da análise exploratória."""
+    pares_validos = df[["chuva_total", "produtividade"]].dropna()
+    correlacao = calcular_correlacao(df)
+    return {
+        "metodo_correlacao": "Pearson",
+        "correlacao_chuva_produtividade": None if np.isnan(correlacao) else round(correlacao, 4),
+        "observacoes_validas": int(len(pares_validos)),
+        "janela_chuva": "outubro do ano anter"
+        ""
+        "ior a março do ano da safra",
+    }
 
 
 def calcular_kpis(df: pd.DataFrame, perfil: str) -> dict:
-    """
-    Calcula KPIs dinâmicos conforme a regra de negócio central da rota.
-    Conforme Item 1.6 - api_grafico.py
-    """
+    """Calcula KPIs exibidos pela API conforme o perfil."""
     if perfil == "produtor":
-        # Produtor vê médias do seu próprio município
         return {
             "produtividade_media": round(df["produtividade"].mean(), 2),
             "chuva_total": round(df["chuva_total"].sum(), 1),
         }
 
     if perfil == "tecnico":
-        # Técnico vê comparação entre os municípios
         agrupado = df.groupby("nome_municipio")["produtividade"].mean().round(2)
         return {"produtividade_por_municipio": agrupado.to_dict()}
 
     if perfil == "gestor":
-        # Gestor vê ranking estadual completo (ordenado)
         ranking = (
             df.groupby("nome_municipio")["produtividade"]
             .mean()
@@ -48,5 +130,4 @@ def calcular_kpis(df: pd.DataFrame, perfil: str) -> dict:
         )
         return {"ranking_estadual": ranking.to_dict()}
 
-    # perfil desconhecido -> resposta mínima, nunca vazar dado de outro perfil
     return {}
