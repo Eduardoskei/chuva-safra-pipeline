@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
-from utils import normalizar
+from app.utils import normalizar
 import pandas as pd
 
 from app.pipeline.analises import calcular_kpis
+from app.pipeline.merge import MENSAGEM_SEM_CLIMA
 
 
 # from app.pipeline.orchestrator import executar_pipeline_completo
@@ -23,6 +24,8 @@ class PontoData(BaseModel):
     ano: int
     chuva: Optional[float] = None
     produtividade: Optional[float] = None
+    clima_disponivel: bool = True
+    mensagem_clima: Optional[str] = None
 
 class KPIsProdutor(BaseModel):
     produtividade_media: Optional[float] = None
@@ -30,11 +33,11 @@ class KPIsProdutor(BaseModel):
 
 
 class KPIsTecnico(BaseModel):
-    produtividade_por_municipio: Dict[str, float]
+    produtividade_por_municipio: Dict[str, Optional[float]]
 
 
 class KPIsGestor(BaseModel):
-    ranking_estadual: Dict[str, float]
+    ranking_estadual: Dict[str, Optional[float]]
 
 
 class KPIsVazio(BaseModel):
@@ -43,9 +46,17 @@ class KPIsVazio(BaseModel):
 
 KPIsType = KPIsProdutor | KPIsTecnico | KPIsGestor | KPIsVazio
 
+
+class MunicipioSemClima(BaseModel):
+    municipio: str
+    uf: Optional[str] = None
+    ano: int
+    mensagem: str
+
 class DadosResponse(BaseModel):
     pontos: List[PontoData]
     kpis: KPIsType
+    municipios_sem_clima: List[MunicipioSemClima] = Field(default_factory=list)
 
 
 # Colunas que a rota /dados exige de quem quer que produza o df final.
@@ -91,6 +102,64 @@ def _validar_contrato(df: pd.DataFrame) -> None:
         )
 
 
+def _valor_json(valor: Any):
+    try:
+        if pd.isna(valor):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if hasattr(valor, "item"):
+        return valor.item()
+
+    return valor
+
+
+def _limpar_json(obj: Any):
+    if isinstance(obj, dict):
+        return {chave: _limpar_json(valor) for chave, valor in obj.items()}
+    if isinstance(obj, list):
+        return [_limpar_json(item) for item in obj]
+    return _valor_json(obj)
+
+
+def _preparar_info_clima(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    if "clima_disponivel" not in df.columns:
+        df["clima_disponivel"] = df["chuva_total"].notna()
+    else:
+        df["clima_disponivel"] = df["clima_disponivel"].fillna(False).astype(bool)
+
+    if "mensagem_clima" not in df.columns:
+        df["mensagem_clima"] = None
+
+    sem_clima = ~df["clima_disponivel"]
+    df.loc[sem_clima & df["mensagem_clima"].isna(), "mensagem_clima"] = MENSAGEM_SEM_CLIMA
+
+    return df
+
+
+def _gerar_relatorio_sem_clima_api(df: pd.DataFrame) -> list[dict]:
+    if df.empty or "clima_disponivel" not in df.columns:
+        return []
+
+    sem_clima = df[~df["clima_disponivel"]].copy()
+    if sem_clima.empty:
+        return []
+
+    relatorio = (
+        sem_clima[["nome_municipio", "uf", "ano", "mensagem_clima"]]
+        .dropna(subset=["ano"])
+        .drop_duplicates()
+        .sort_values(["uf", "nome_municipio", "ano"])
+        .rename(columns={"nome_municipio": "municipio", "mensagem_clima": "mensagem"})
+    )
+    relatorio["ano"] = relatorio["ano"].astype(int)
+
+    return _limpar_json(relatorio.to_dict(orient="records"))
+
+
 # ==========================================
 # ROTA: GET /dados
 # ==========================================
@@ -124,13 +193,25 @@ def obter_dados(
     ]
 
     if df_final.empty:
-        return {"pontos": [], "kpis": {}}
+        return {"pontos": [], "kpis": {}, "municipios_sem_clima": []}
 
-    df_contrato = df_final[["nome_municipio", "ano", "chuva_total", "produtividade"]].rename(
+    df_final = _preparar_info_clima(df_final)
+    municipios_sem_clima = _gerar_relatorio_sem_clima_api(df_final)
+
+    df_contrato = df_final[
+        [
+            "nome_municipio",
+            "ano",
+            "chuva_total",
+            "produtividade",
+            "clima_disponivel",
+            "mensagem_clima",
+        ]
+    ].rename(
         columns={"nome_municipio": "municipio", "chuva_total": "chuva"}
     )
-    
-    pontos = df_contrato.to_dict(orient="records")
+
+    pontos = _limpar_json(df_contrato.to_dict(orient="records"))
 
     try:
         kpis = calcular_kpis(df=df_final, perfil=perfil)
@@ -140,7 +221,11 @@ def obter_dados(
             detail=f"Não foi possível calcular os KPIs, coluna ausente: {e}",
         )
 
-    return {"pontos": pontos, "kpis": kpis}
+    return {
+        "pontos": pontos,
+        "kpis": _limpar_json(kpis),
+        "municipios_sem_clima": municipios_sem_clima,
+    }
 
 
 # ==========================================
