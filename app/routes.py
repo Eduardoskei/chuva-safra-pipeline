@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Literal
 from app.utils import normalizar
 import pandas as pd
 from app.pipeline.analises import calcular_kpis, resumir_analise
-# from app.pipeline.orchestrator import executar_pipeline_completo
+from app.pipeline.orchestrator import executar_pipeline_completo, obter_relatorio_sem_clima
 
 router = APIRouter()
 PerfilType = Literal["produtor", "tecnico", "gestor"]
@@ -82,21 +82,6 @@ def _relatorio_mock() -> pd.DataFrame:
     # df_final completo (todos municípios, não só o recorte pedido).
     return pd.DataFrame(columns=["nome_municipio", "uf", "ano", "motivo"])
 
-
-def _pipeline_mock(municipios: list[str], cultura: str, de: int, ate: int) -> pd.DataFrame:
-
-    # Mock temporário até app/pipeline/orchestrator.executar_pipeline_completo
-
-    return pd.DataFrame({
-        "nome_municipio": ["Amontada", "Amontada", "Abaiara", "Abaiara"],
-        "uf": ["Ceará", "Ceará", "Ceará", "Ceará"],
-        "ano": [2020, 2021, 2020, 2021],
-        "cultura": ["Milho", "Milho", "Feijão", "Milho"],
-        "chuva_total": [812.4, 650.1, 900.5, 700.0],
-        "produtividade": [2.7, 1.5, 2.1, 1.9],
-    })
-
-
 def _validar_contrato(df: pd.DataFrame) -> None:
     faltando = COLUNAS_ESPERADAS - set(df.columns)
     if faltando:
@@ -124,7 +109,7 @@ def obter_dados(
     if de > ate:
         raise HTTPException(400, "'de' não pode ser maior que 'ate'")
 
-    df_final = _pipeline_mock(lista_municipios, cultura, de, ate)
+    df_final = executar_pipeline_completo(lista_municipios, cultura, de, ate)
     _validar_contrato(df_final)
 
     lista_municipios_norm = [normalizar(m) for m in lista_municipios]
@@ -225,7 +210,7 @@ def relatorio_sem_clima():
     try:
         from app.pipeline.merge import construir_relatorio_sem_clima
         # df_final = executar_pipeline_completo(...)  # troque quando existir
-        df_final = _pipeline_mock([], "", 0, 9999)  # placeholder
+        df_final = obter_relatorio_sem_clima([], "", 0, 9999)  # placeholder
         relatorio = construir_relatorio_sem_clima(df_final)
     except ImportError:
         relatorio = _relatorio_mock()

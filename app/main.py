@@ -16,4 +16,5 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
+    print('teste')
     return {"Hello": "World"}
