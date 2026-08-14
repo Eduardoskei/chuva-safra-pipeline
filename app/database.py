@@ -44,6 +44,41 @@ def init_db():
                     PRIMARY KEY (nome_municipio, uf)
                 );
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS producao_agricola (
+                id                  BIGSERIAL PRIMARY KEY,
+                municipio_uf_chave  TEXT NOT NULL,
+                municipio           TEXT NOT NULL,
+                municipio_original  TEXT NOT NULL,
+                uf                  TEXT NOT NULL,
+                uf_normalizada      TEXT NOT NULL,
+                ano                 INTEGER NOT NULL,
+                tipo_lavoura        TEXT NOT NULL,
+                variavel_id         TEXT NOT NULL,
+                variavel_nome       TEXT,
+                unidade             TEXT,
+                categoria_id        TEXT NOT NULL DEFAULT '',
+                categoria_nome      TEXT,
+                valor               DOUBLE PRECISION,
+                updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (municipio_uf_chave, ano, categoria_id, variavel_id, tipo_lavoura)
+                );
+      """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS clima_diario (
+                    id                        BIGSERIAL PRIMARY KEY,
+                    municipio_uf_chave        TEXT NOT NULL,
+                    nome_municipio            TEXT NOT NULL,
+                    nome_municipio_original   TEXT NOT NULL,
+                    uf                        TEXT NOT NULL,
+                    uf_normalizada            TEXT NOT NULL,
+                    data                      DATE NOT NULL,
+                    precipitacao_mm           DOUBLE PRECISION,
+                    temperatura_maxima_c      DOUBLE PRECISION,
+                    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (municipio_uf_chave, data)
+                );
+            """) 
     finally:
         put_conn(conn)
 
