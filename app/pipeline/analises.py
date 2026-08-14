@@ -108,26 +108,52 @@ def resumir_analise(df: pd.DataFrame) -> dict:
         "ior a março do ano da safra",
     }
 
+def sanitizar(valor):
+    if valor is None:
+        return None
+    try:
+        if pd.isna(valor):
+            return None
+    except TypeError:
+        pass
+    return valor
+
 
 def calcular_kpis(df: pd.DataFrame, perfil: str) -> dict:
-    """Calcula KPIs exibidos pela API conforme o perfil."""
+    if df is None or df.empty:
+        return {}
+
     if perfil == "produtor":
+        produtividade_media = df["produtividade"].mean() if df["produtividade"].notna().any() else None
+        chuva_total = df["chuva_total"].sum() if df["chuva_total"].notna().any() else None
         return {
-            "produtividade_media": round(df["produtividade"].mean(), 2),
-            "chuva_total": round(df["chuva_total"].sum(), 1),
+            "produtividade_media": sanitizar(round(produtividade_media, 2)) if produtividade_media is not None else None,
+            "chuva_total": sanitizar(round(chuva_total, 1)) if chuva_total is not None else None,
+            "anos_sem_dado_climatico": int(df["chuva_total"].isna().sum()),
         }
 
     if perfil == "tecnico":
         agrupado = df.groupby("nome_municipio")["produtividade"].mean().round(2)
-        return {"produtividade_por_municipio": agrupado.to_dict()}
+        sem_clima = (
+            df.groupby("nome_municipio")["chuva_total"]
+            .apply(lambda s: bool(s.isna().all()))
+        )
+        return {
+            "produtividade_por_municipio": {m: sanitizar(v) for m, v in agrupado.items()},
+            "municipios_sem_clima": [m for m, sem in sem_clima.items() if sem],
+        }
 
     if perfil == "gestor":
-        ranking = (
-            df.groupby("nome_municipio")["produtividade"]
-            .mean()
-            .sort_values(ascending=False)
-            .round(2)
-        )
-        return {"ranking_estadual": ranking.to_dict()}
+        ranking = df.groupby("nome_municipio")["produtividade"].mean().sort_values(ascending=False).round(2)
+        total = df["nome_municipio"].nunique()
+        com_clima = df.loc[df["chuva_total"].notna(), "nome_municipio"].nunique()
+        return {
+            "ranking_estadual": {m: sanitizar(v) for m, v in ranking.items()},
+            "cobertura_climatica": {
+                "total_municipios": int(total),
+                "com_dado_climatico": int(com_clima),
+                "sem_dado_climatico": int(total - com_clima),
+            },
+        }
 
     return {}

@@ -7,6 +7,55 @@ def validar_chave_unica(df: pd.DataFrame, chave: list[str], nome_base: str):
     if df.duplicated(subset=chave).any():
         raise ValueError(f"Erro: chaves duplicadas encontradas na base de {nome_base}!")
 
+def construir_relatorio_sem_clima(df_final: pd.DataFrame) -> pd.DataFrame:
+    """
+    A partir do resultado do merge (produção + clima, left join),
+    isola município/ano que ficaram sem correspondência climática.
+
+    Retorna colunas: nome_municipio, uf, ano, motivo
+    """
+    coluna_indicador = "chuva_total"
+    if coluna_indicador not in df_final.columns:
+        raise KeyError(
+            f"Coluna '{coluna_indicador}' não encontrada; confirme que o "
+            "merge foi feito com o clima já agregado por safra."
+        )
+
+    sem_clima = df_final[df_final[coluna_indicador].isna()].copy()
+
+    if sem_clima.empty:
+        return pd.DataFrame(columns=["nome_municipio", "uf", "ano", "motivo"])
+
+    sem_clima["motivo"] = "sem_correspondencia_climatica"
+
+    return (
+        sem_clima[["nome_municipio", "uf", "ano", "motivo"]]
+        .sort_values(["uf", "nome_municipio", "ano"])
+        .reset_index(drop=True)
+    )
+
+
+def enriquecer_relatorio_com_motivo_geocoding(relatorio: pd.DataFrame, df_falhas_geocoding: pd.DataFrame) -> pd.DataFrame:
+    if df_falhas_geocoding is None or df_falhas_geocoding.empty:
+        return relatorio
+
+    falhas = df_falhas_geocoding.copy()
+    falhas["chave_nome"] = falhas["nome_municipio"].map(normalizar_nome)
+    falhas["chave_uf"] = falhas["uf"].map(normalizar_nome).replace(MAPA_UF)
+
+    relatorio = relatorio.copy()
+    relatorio["chave_nome"] = relatorio["nome_municipio"].map(normalizar_nome)
+    relatorio["chave_uf"] = relatorio["uf"].map(normalizar_nome).replace(MAPA_UF)
+
+    relatorio = relatorio.merge(
+        falhas[["chave_nome", "chave_uf", "motivo"]]
+        .rename(columns={"motivo": "motivo_detalhado"}),
+        on=["chave_nome", "chave_uf"],
+        how="left",
+    )
+    relatorio["motivo"] = relatorio["motivo_detalhado"].fillna(relatorio["motivo"])
+    return relatorio.drop(columns=["chave_nome", "chave_uf", "motivo_detalhado"])
+
 def cruzar_producao_clima_por_nome(df_producao: pd.DataFrame, df_clima: pd.DataFrame) -> pd.DataFrame:
     """
     Cruza produção e clima usando (nome_municipio normalizado + UF + ano).
