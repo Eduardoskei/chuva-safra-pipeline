@@ -1,23 +1,14 @@
 from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Dict, Any, Literal
 from app.utils import normalizar
 import pandas as pd
-
 from app.pipeline.analises import calcular_kpis, resumir_analise
-
-
 # from app.pipeline.orchestrator import executar_pipeline_completo
 
 router = APIRouter()
-
-# ==========================================
-# MODELOS DE CONTRATO (PYDANTIC)
-# ==========================================
 PerfilType = Literal["produtor", "tecnico", "gestor"]
-
-
 class PontoData(BaseModel):
     municipio: str
     ano: int
@@ -25,20 +16,23 @@ class PontoData(BaseModel):
     produtividade: Optional[float] = None
 
 class KPIsProdutor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     produtividade_media: Optional[float] = None
     chuva_total: Optional[float] = None
-
+    anos_sem_dado_climatico: Optional[int] = None
 
 class KPIsTecnico(BaseModel):
-    produtividade_por_municipio: Dict[str, float]
-
+    model_config = ConfigDict(extra="forbid")
+    produtividade_por_municipio: Dict[str, Optional[float]]
+    municipios_sem_clima: List[str] = []
 
 class KPIsGestor(BaseModel):
-    ranking_estadual: Dict[str, float]
-
+    model_config = ConfigDict(extra="forbid")
+    ranking_estadual: Dict[str, Optional[float]]
+    cobertura_climatica: Optional[Dict[str, int]] = None
 
 class KPIsVazio(BaseModel):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 KPIsType = KPIsProdutor | KPIsTecnico | KPIsGestor | KPIsVazio
@@ -55,11 +49,22 @@ class DadosResponse(BaseModel):
     pontos: List[PontoData]
     kpis: KPIsType
     analise: AnaliseResponse
+    avisos: List[str] = []
+
+class RegistroSemClima(BaseModel):
+    nome_municipio: str
+    uf: str
+    ano: int
+    motivo: str
+
+
+class RelatorioSemClimaResponse(BaseModel):
+    total: int
+    registros: List[RegistroSemClima]
 
 
 # Colunas que a rota /dados exige de quem quer que produza o df final.
 COLUNAS_ESPERADAS = {"nome_municipio", "uf", "ano", "cultura", "chuva_total", "produtividade"}
-
 
 def parse_municipios(municipios: str = Query(..., description="Municípios separados por vírgula")) -> list[str]:
     """
@@ -71,6 +76,11 @@ def parse_municipios(municipios: str = Query(..., description="Municípios separ
     if not lista:
         raise HTTPException(400, "informe ao menos um município em 'municipios'")
     return lista
+
+def _relatorio_mock() -> pd.DataFrame:
+    # Mock temporário até existir app/pipeline/orchestrator com o
+    # df_final completo (todos municípios, não só o recorte pedido).
+    return pd.DataFrame(columns=["nome_municipio", "uf", "ano", "motivo"])
 
 
 def _pipeline_mock(municipios: list[str], cultura: str, de: int, ate: int) -> pd.DataFrame:
@@ -114,13 +124,7 @@ def obter_dados(
     if de > ate:
         raise HTTPException(400, "'de' não pode ser maior que 'ate'")
 
-    # ------------------------------------------------------------------
-    # PONTO DE TROCA: comente a linha do mock e descomente as duas
-    # linhas abaixo assim que executar_pipeline_completo() existir.
-    # ------------------------------------------------------------------
     df_final = _pipeline_mock(lista_municipios, cultura, de, ate)
-        # df_final = executar_pipeline_completo(...)
-
     _validar_contrato(df_final)
 
     lista_municipios_norm = [normalizar(m) for m in lista_municipios]
@@ -133,12 +137,19 @@ def obter_dados(
     ]
 
     if df_final.empty:
-        return {"pontos": [], "kpis": {}, "analise": resumir_analise(df_final)}
+        return {"pontos": [], "kpis": {}, "analise": resumir_analise(df_final), "avisos": [
+            "Nenhum dado encontrado para esse recorte (município/cultura/período)."
+        ]}
+
+    municipios_retornados = set(df_final["nome_municipio"].apply(normalizar))
+    faltando = [m for m, n in zip(lista_municipios, lista_municipios_norm) if n not in municipios_retornados]
+    avisos = [f"Sem dado para '{m}' nesse recorte (possivelmente sem clima ou sem cultivo dessa cultura)." for m in faltando]
 
     df_contrato = df_final[["nome_municipio", "ano", "chuva_total", "produtividade"]].rename(
         columns={"nome_municipio": "municipio", "chuva_total": "chuva"}
     )
-    
+
+    df_contrato = df_contrato.where(pd.notna(df_contrato), None)
     pontos = df_contrato.to_dict(orient="records")
 
     try:
@@ -149,7 +160,7 @@ def obter_dados(
             detail=f"Não foi possível calcular os KPIs, coluna ausente: {e}",
         )
 
-    return {"pontos": pontos, "kpis": kpis, "analise": resumir_analise(df_final)}
+    return {"pontos": pontos, "kpis": kpis, "analise": resumir_analise(df_final), "avisos": avisos}
 
 
 # ==========================================
@@ -204,3 +215,22 @@ def obter_mapa(
         )
 
     return HTMLResponse(html_mapa)
+
+@router.get("/relatorio/sem-clima", response_model=RelatorioSemClimaResponse)
+def relatorio_sem_clima():
+    """
+    Transparência do merge: quais município/ano têm produção no IBGE
+    mas ficaram sem correspondência climática, e por quê.
+    """
+    try:
+        from app.pipeline.merge import construir_relatorio_sem_clima
+        # df_final = executar_pipeline_completo(...)  # troque quando existir
+        df_final = _pipeline_mock([], "", 0, 9999)  # placeholder
+        relatorio = construir_relatorio_sem_clima(df_final)
+    except ImportError:
+        relatorio = _relatorio_mock()
+    except Exception as e:
+        print(f"Erro ao gerar relatório de clima ausente: {e}")
+        return {"total": 0, "registros": []}
+
+    return {"total": int(len(relatorio)), "registros": relatorio.to_dict(orient="records")}
