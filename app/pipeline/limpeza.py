@@ -8,14 +8,52 @@ Função principal: processar_dados_brutos(...)
 """
 from __future__ import annotations
 
+import re
+import unicodedata
+
 import pandas as pd
 
 # Códigos que o IBGE usa para indicar dado ausente/sigiloso/não aplicável
 VALORES_AUSENTES_IBGE = {"-", "..", "...", "X", ""}
 
 
+def normalizar_nome_municipio(nome: object) -> str:
+    """Cria uma forma estavel do municipio para comparacoes e juncoes."""
+    if pd.isna(nome):
+        return ""
+
+    texto = unicodedata.normalize("NFKD", str(nome).strip().casefold())
+    texto = "".join(caractere for caractere in texto if not unicodedata.combining(caractere))
+    texto = re.sub(r"[^a-z0-9]+", " ", texto)
+    return " ".join(texto.split())
+
+
+def normalizar_uf(uf: object) -> str:
+    """Padroniza a UF para uso na chave do municipio."""
+    if pd.isna(uf):
+        return ""
+    return re.sub(r"[^A-Z]", "", str(uf).strip().upper())
+
+
+def _adicionar_chaves_municipio(
+    df: pd.DataFrame,
+    coluna_municipio: str,
+) -> pd.DataFrame:
+
+    coluna_original = f"{coluna_municipio}_original"
+    df[coluna_municipio] = df[coluna_municipio].astype("string").str.strip()
+    df["uf"] = df["uf"].astype("string").str.strip().str.upper()
+    df[coluna_original] = df[coluna_municipio]
+    df["municipio_normalizado"] = df[coluna_municipio].map(normalizar_nome_municipio)
+    df["uf_normalizada"] = df["uf"].map(normalizar_uf)
+    df["municipio_uf_chave"] = (
+        df["municipio_normalizado"] + "|" + df["uf_normalizada"]
+    )
+    return df
+
+
 def _dividir_municipio_uf(nome_localidade: str) -> tuple[str, str]:
-    """Ex: 'Abaiara - CE' -> ('Abaiara', 'CE')."""
+    
     if " - " in nome_localidade:
         municipio, uf = nome_localidade.rsplit(" - ", 1)
         return municipio.strip(), uf.strip()
@@ -23,12 +61,7 @@ def _dividir_municipio_uf(nome_localidade: str) -> tuple[str, str]:
 
 
 def transformar_produtos_ibge(dados_brutos: list[dict]) -> pd.DataFrame:
-    """
-    Recebe a lista bruta retornada por buscar_produtos_nordeste()
-    (uma lista de variáveis do IBGE, cada uma com resultados aninhados
-    por classificação e por localidade/ano) e devolve um DataFrame
-    em formato "long": uma linha por localidade x classificação x ano.
-    """
+   
     linhas = []
 
     for bloco_variavel in dados_brutos:
@@ -83,14 +116,21 @@ def limpar_produtos_df(df: pd.DataFrame) -> pd.DataFrame:
 
     df["ano"] = pd.to_numeric(df["ano"], errors="coerce").astype("Int64")
 
-    for coluna in ["municipio", "uf", "categoria_nome", "variavel_nome", "tipo_lavoura"]:
+    for coluna in ["categoria_nome", "variavel_nome", "tipo_lavoura"]:
         df[coluna] = df[coluna].astype(str).str.strip()
 
+    df = _adicionar_chaves_municipio(df, "municipio")
+
     df = df.dropna(subset=["ano", "municipio"])
+    df = df[df["municipio_normalizado"] != ""]
     df = df.drop_duplicates(
-        subset=["municipio", "uf", "ano", "categoria_id", "variavel_id", "tipo_lavoura"]
+        subset=[
+            "municipio_uf_chave", "ano", "categoria_id", "variavel_id", "tipo_lavoura"
+        ]
     )
-    df = df.sort_values(["uf", "municipio", "ano", "tipo_lavoura"]).reset_index(drop=True)
+    df = df.sort_values(
+        ["uf_normalizada", "municipio_normalizado", "ano", "tipo_lavoura"]
+    ).reset_index(drop=True)
 
     return df
 
@@ -106,12 +146,14 @@ def limpar_clima_df(df: pd.DataFrame) -> pd.DataFrame:
     df["precipitacao_mm"] = pd.to_numeric(df["precipitacao_mm"], errors="coerce")
     df["temperatura_maxima_c"] = pd.to_numeric(df["temperatura_maxima_c"], errors="coerce")
 
-    for coluna in ["nome_municipio", "uf"]:
-        df[coluna] = df[coluna].astype(str).str.strip()
+    df = _adicionar_chaves_municipio(df, "nome_municipio")
 
     df = df.dropna(subset=["data"])
-    df = df.drop_duplicates(subset=["nome_municipio", "uf", "data"])
-    df = df.sort_values(["uf", "nome_municipio", "data"]).reset_index(drop=True)
+    df = df[df["municipio_normalizado"] != ""]
+    df = df.drop_duplicates(subset=["municipio_uf_chave", "data"])
+    df = df.sort_values(
+        ["uf_normalizada", "municipio_normalizado", "data"]
+    ).reset_index(drop=True)
 
     return df
 
@@ -120,14 +162,7 @@ def processar_dados_brutos(
     dados_produtos_brutos: list[dict],
     dados_clima_brutos: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Recebe:
-      - dados_produtos_brutos: saída de buscar_produtos_nordeste()
-      - dados_clima_brutos: saída de buscar_clima_municipios(...)
-
-    Transforma e limpa cada fonte e devolve os DataFrames separadamente:
-      (df_produtos, df_clima)
-    """
+    
     df_produtos = transformar_produtos_ibge(dados_produtos_brutos)
     df_produtos = limpar_produtos_df(df_produtos)
 
